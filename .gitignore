@@ -7,3 +7,11 @@ demo/
 *.db
 chromedriver
 chromedriver.deb
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+*.sqlite3*
+node_modules/
+frontend/dist/
+data/raw/
+.env
