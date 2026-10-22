@@ -1,6 +1,6 @@
 ### A threaded scraper
 ### This script will scrape a list of websites
-
+### Single-browser collector; failed requests do not mark offers inactive
 import glob
 import os
 import time
@@ -20,6 +20,8 @@ from selenium.common.exceptions import (
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from sqlite_operations import setup_database, save_offer_to_db
+from driver_setup import driver_setup
+from scrape_links import collect_links
 import traceback
 import sys
 
@@ -35,6 +37,34 @@ unknown = {
     "active": "No",
 }
 
+
+def collect(search_url, max_pages=1, max_offers=5):
+    driver = driver_setup()
+    records, errors = {}, []
+    try:
+        links = collect_links(driver, search_url, max_pages, max_offers)
+        for url in links:
+            try:
+                driver.get(url)
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h1, [data-cy="ad_title"]')))
+                def first(selector):
+                    matches = driver.find_elements(By.CSS_SELECTOR, selector)
+                    return next((e.text for e in matches if e.text.strip()), None)
+                row = dict(offer_title=first('h1, [data-cy="ad_title"]'),
+                           price=first('[data-testid="ad-price-container"], strong[aria-label="Cena"]'),
+                           location=first('a[href="#map"], [data-testid="location-date"]'),
+                           tags=first('[data-testid="ad-parameters-container"], [data-testid="ad.top-information.table"]'))
+                if not row['offer_title'] or not row['price']:
+                    raise ValueError('Missing title/price; inspect selectors or blocked page')
+                # Availability has not been independently verified.
+                row['active'] = None
+                records[url] = row
+            except (WebDriverException, ValueError) as exc:
+                errors.append(dict(url=url, error=str(exc)[:500]))
+            time.sleep(1)
+    finally:
+        driver.quit()
+    return records, errors
 
 def try_find_element(driver, xpath, not_found_message):
     # find single element using xpath

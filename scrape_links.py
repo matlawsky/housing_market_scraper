@@ -1,3 +1,4 @@
+"""Bounded OLX sale-search link discovery. Selectors require live verification."""
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
@@ -14,6 +15,43 @@ import glob
 import os
 import sqlite3
 from sqlite_operations import setup_database, save_offer_to_db
+from urllib.parse import urljoin, urlsplit
+from pipeline import canonical_url
+
+
+def collect_links(driver, search_url, max_pages=1, max_offers=5):
+    p = urlsplit(search_url)
+    canonical_url(search_url)
+    if p.hostname not in ('olx.pl', 'www.olx.pl') or '/mieszkania/sprzedaz/' not in p.path:
+        raise ValueError('Provide an OLX apartment SALES search URL')
+    current, visited, links = search_url, set(), {}
+    for _ in range(max_pages):
+        if current in visited:
+            break
+        visited.add(current)
+        driver.get(current)
+        for button in driver.find_elements(By.ID, 'onetrust-accept-btn-handler'):
+            if button.is_displayed():
+                button.click()
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-cy="l-card"] a[href]')))
+        for element in driver.find_elements(By.CSS_SELECTOR, '[data-cy="l-card"] a[href]'):
+            href = element.get_attribute('href') or ''
+            try:
+                url = canonical_url(urljoin(current, href))
+            except ValueError:
+                continue
+            if '/oferta/' in url:
+                links[url] = None
+                if len(links) >= max_offers:
+                    return list(links)
+        forward = driver.find_elements(By.CSS_SELECTOR, 'a[data-cy="pagination-forward"]')
+        href = forward[0].get_attribute('href') if forward else None
+        if not href:
+            break
+        current = urljoin(current, href)
+        canonical_url(current)
+        time.sleep(1)
+    return list(links)
 
 
 def collect_list_of_links_to_offers(driver, category, n):
